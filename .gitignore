@@ -1,0 +1,18 @@
+# Binary
+*.exe
+*.dmb
+*.rsc
+
+# Output
+test-output/
+
+# Go
+go.sum
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
