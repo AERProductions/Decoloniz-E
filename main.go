@@ -16,6 +16,36 @@ import (
 	"audio-converter/detector"
 )
 
+const version = "1.0.0"
+
+// ANSI color codes
+const (
+	reset   = "\033[0m"
+	bold    = "\033[1m"
+	dim     = "\033[2m"
+	red     = "\033[31m"
+	green   = "\033[32m"
+	yellow  = "\033[33m"
+	cyan    = "\033[36m"
+	magenta = "\033[35m"
+	gold    = "\033[38;5;220m"
+)
+
+func printBanner() {
+	fmt.Println(gold + bold + `
+  ____                _             _        ______
+ |  _ \  ___  ___ ___| | ___  _ __ (_)____  |  ____|` + reset + gold + `
+ | | | |/ _ \/ __/ _ \ |/ _ \| '_ \| |_  /  | |__
+ | |_| |  __/ (_| (_) | | (_) | | | | |/ /___| |___` + reset + gold + bold + `
+ |____/ \___|\___\___/|_|\___/|_| |_|_/_____|______|` + reset + `
+` +
+		dim + `          432Hz Resonance Engine — v` + version + reset + `
+` +
+		dim + `    "The standard is binary. The reality is ternary.` + reset + `
+` +
+		dim + `             The frequency is 432."` + reset)
+}
+
 type job struct {
 	inPath  string
 	outPath string
@@ -46,6 +76,7 @@ func main() {
 	}
 
 	// --- CLI flags mode ---
+	printBanner()
 	inputDir := flag.String("in", "", "Input directory (recursive) or single file")
 	outputDir := flag.String("out", "", "Output directory (mirrors input structure)")
 	targetHz := flag.Float64("target", 432.0, "Target A4 frequency in Hz")
@@ -53,11 +84,12 @@ func main() {
 	workers := flag.Int("workers", 0, "Worker count (default: NumCPU - 2, min 1)")
 	dryRun := flag.Bool("dry-run", false, "Analyze only, don't convert")
 	detectorName := flag.String("detector", "fft", "Pitch detector: fft, npu, mesh")
+	tag := flag.String("tag", "", `Append tag to output title metadata (e.g. "(432Hz)"). Empty = no tagging`)
 	verbose := flag.Bool("v", false, "Verbose output")
 	flag.Parse()
 
 	if *inputDir == "" || *outputDir == "" {
-		fmt.Fprintf(os.Stderr, "Usage: audio-converter -in <dir|file> -out <dir> [flags]\n")
+		fmt.Fprintf(os.Stderr, "Usage: decoloniz-e -in <dir|file> -out <dir> [flags]\n")
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
@@ -85,10 +117,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Printf("Audio Converter — target: %.1f Hz | detector: %s | workers: %d\n",
+	fmt.Printf(cyan+"  Target: "+reset+"%.1f Hz"+cyan+" | Detector: "+reset+"%s"+cyan+" | Workers: "+reset+"%d\n",
 		*targetHz, det.Name(), *workers)
 	if *dryRun {
-		fmt.Println("** DRY RUN — no files will be written **")
+		fmt.Println(yellow + bold + "  ** DRY RUN — no files will be written **" + reset)
 	}
 
 	// --- Discover audio files ---
@@ -142,7 +174,7 @@ func main() {
 		go func() {
 			defer wg.Done()
 			for j := range jobCh {
-				r := processFile(j, det, *targetHz, *threshold, *dryRun, *verbose)
+				r := processFile(j, det, *targetHz, *threshold, *dryRun, *verbose, *tag)
 				processed.Add(1)
 				count := processed.Load()
 				pct := float64(count) / float64(total) * 100
@@ -168,28 +200,30 @@ func main() {
 		if r.err != nil {
 			errored++
 			if *verbose {
-				fmt.Printf("\n  ERROR %s: %v\n", filepath.Base(r.path), r.err)
+				fmt.Printf("\n  "+red+"ERROR"+reset+" %s: %v\n", filepath.Base(r.path), r.err)
 			}
 		} else if r.skipped {
 			skipped++
 			if *verbose {
-				fmt.Printf("\n  SKIP  %s (%.2f Hz — within threshold)\n", filepath.Base(r.path), r.detected)
+				fmt.Printf("\n  "+yellow+"SKIP "+reset+" %s "+dim+"(%.2f Hz — within threshold)"+reset+"\n", filepath.Base(r.path), r.detected)
 			}
 		} else {
 			converted++
 			if *verbose {
-				fmt.Printf("\n  OK    %s  %.2f Hz → %.1f Hz (ratio %.6f)\n",
+				fmt.Printf("\n  "+green+"OK   "+reset+" %s  "+dim+"%.2f Hz"+reset+" → "+gold+"%.1f Hz"+reset+" "+dim+"(ratio %.6f)"+reset+"\n",
 					filepath.Base(r.path), r.detected, *targetHz, r.ratio)
 			}
 		}
 	}
 
 	elapsed := time.Since(start)
-	fmt.Printf("\n\nDone in %s — %d converted, %d skipped, %d errors (of %d)\n",
+	fmt.Printf("\n" + bold + "\n  ══════════════════════════════════════════════════" + reset + "\n")
+	fmt.Printf("  Done in %s — "+green+"%d converted"+reset+", "+yellow+"%d skipped"+reset+", "+red+"%d errors"+reset+" (of %d)\n",
 		elapsed.Round(time.Millisecond), converted, skipped, errored, len(jobs))
+	fmt.Println(bold + "  ══════════════════════════════════════════════════" + reset)
 }
 
-func processFile(j job, det detector.Detector, targetHz, threshold float64, dryRun, verbose bool) result {
+func processFile(j job, det detector.Detector, targetHz, threshold float64, dryRun, verbose bool, tag string) result {
 	// Decode to PCM.
 	samples, sampleRate, err := audio.DecodeToPCM(j.inPath)
 	if err != nil {
@@ -235,7 +269,7 @@ func processFile(j job, det detector.Detector, targetHz, threshold float64, dryR
 		samePath = true
 	}
 
-	if err := audio.ConvertWithSampleRate(j.inPath, outPath, ratio, sampleRate); err != nil {
+	if err := audio.ConvertWithSampleRate(j.inPath, outPath, ratio, sampleRate, tag); err != nil {
 		return result{path: j.inPath, err: fmt.Errorf("convert: %w", err)}
 	}
 
@@ -271,8 +305,8 @@ func runDragDrop(paths []string) {
 		numWorkers = 1
 	}
 
-	fmt.Println("=== Audio Converter (Drag & Drop) ===")
-	fmt.Printf("Target: %.1f Hz | Detector: %s | Workers: %d\n\n", targetHz, det.Name(), numWorkers)
+	printBanner()
+	fmt.Printf(cyan+"  Target: "+reset+"%.1f Hz"+cyan+" | Detector: "+reset+"%s"+cyan+" | Workers: "+reset+"%d\n\n", targetHz, det.Name(), numWorkers)
 
 	// Collect all audio files from dropped paths.
 	var jobs []job
@@ -339,7 +373,7 @@ func runDragDrop(paths []string) {
 		go func() {
 			defer wg.Done()
 			for j := range jobCh {
-				r := processFile(j, det, targetHz, threshold, false, true)
+				r := processFile(j, det, targetHz, threshold, false, true, "")
 				processed.Add(1)
 				count := processed.Load()
 				pct := float64(count) / float64(total) * 100
@@ -363,20 +397,22 @@ func runDragDrop(paths []string) {
 	for r := range resultCh {
 		if r.err != nil {
 			errored++
-			fmt.Printf("\n  ERROR %s: %v\n", filepath.Base(r.path), r.err)
+			fmt.Printf("\n  "+red+"ERROR"+reset+" %s: %v\n", filepath.Base(r.path), r.err)
 		} else if r.skipped {
 			skipped++
-			fmt.Printf("\n  SKIP  %s (%.2f Hz — already at target)\n", filepath.Base(r.path), r.detected)
+			fmt.Printf("\n  "+yellow+"SKIP "+reset+" %s "+dim+"(%.2f Hz — already at target)"+reset+"\n", filepath.Base(r.path), r.detected)
 		} else {
 			converted++
-			fmt.Printf("\n  OK    %s  %.2f Hz -> %.1f Hz (ratio %.6f)\n",
+			fmt.Printf("\n  "+green+"OK   "+reset+" %s  "+dim+"%.2f Hz"+reset+" → "+gold+"%.1f Hz"+reset+" "+dim+"(ratio %.6f)"+reset+"\n",
 				filepath.Base(r.path), r.detected, targetHz, r.ratio)
 		}
 	}
 
 	elapsed := time.Since(start)
-	fmt.Printf("\n\nDone in %s — %d converted, %d skipped, %d errors (of %d)\n",
+	fmt.Printf("\n" + bold + "\n  ══════════════════════════════════════════════════" + reset + "\n")
+	fmt.Printf("  Done in %s — "+green+"%d converted"+reset+", "+yellow+"%d skipped"+reset+", "+red+"%d errors"+reset+" (of %d)\n",
 		elapsed.Round(time.Millisecond), converted, skipped, errored, len(jobs))
+	fmt.Println(bold + "  ══════════════════════════════════════════════════" + reset)
 	pause()
 }
 
