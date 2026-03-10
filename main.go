@@ -16,7 +16,7 @@ import (
 	"audio-converter/detector"
 )
 
-const version = "1.0.0"
+const version = "2.0.0"
 
 // ANSI color codes
 const (
@@ -85,6 +85,10 @@ func main() {
 	dryRun := flag.Bool("dry-run", false, "Analyze only, don't convert")
 	detectorName := flag.String("detector", "fft", "Pitch detector: fft, npu, mesh")
 	tag := flag.String("tag", "", `Append tag to output title metadata (e.g. "(432Hz)"). Empty = no tagging`)
+	quality := flag.Int("quality", 0, "Audio quality (1-10, 0=codec default). Controls bitrate/compression per format")
+	eqBass := flag.Float64("eq-bass", 0, "EQ bass boost/cut in dB (~100 Hz)")
+	eqMid := flag.Float64("eq-mid", 0, "EQ mid boost/cut in dB (~1000 Hz)")
+	eqTreble := flag.Float64("eq-treble", 0, "EQ treble boost/cut in dB (~8000 Hz)")
 	verbose := flag.Bool("v", false, "Verbose output")
 	flag.Parse()
 
@@ -99,6 +103,12 @@ func main() {
 		if *workers < 1 {
 			*workers = 1
 		}
+	}
+
+	// --- EQ settings ---
+	var eq *audio.EQSettings
+	if *eqBass != 0 || *eqMid != 0 || *eqTreble != 0 {
+		eq = &audio.EQSettings{Bass: *eqBass, Mid: *eqMid, Treble: *eqTreble}
 	}
 
 	// --- Select detector ---
@@ -117,8 +127,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Printf(cyan+"  Target: "+reset+"%.1f Hz"+cyan+" | Detector: "+reset+"%s"+cyan+" | Workers: "+reset+"%d\n",
+	fmt.Printf(cyan+"  Target: "+reset+"%.1f Hz"+cyan+" | Detector: "+reset+"%s"+cyan+" | Workers: "+reset+"%d"+cyan+" | Engine: "+reset+"rubberband\n",
 		*targetHz, det.Name(), *workers)
+	if eq != nil {
+		fmt.Printf(cyan+"  EQ: "+reset+"bass=%.1f mid=%.1f treble=%.1f dB\n", eq.Bass, eq.Mid, eq.Treble)
+	}
+	if *quality > 0 {
+		fmt.Printf(cyan+"  Quality: "+reset+"%d/10\n", *quality)
+	}
 	if *dryRun {
 		fmt.Println(yellow + bold + "  ** DRY RUN — no files will be written **" + reset)
 	}
@@ -174,7 +190,7 @@ func main() {
 		go func() {
 			defer wg.Done()
 			for j := range jobCh {
-				r := processFile(j, det, *targetHz, *threshold, *dryRun, *verbose, *tag)
+				r := processFile(j, det, *targetHz, *threshold, *dryRun, *verbose, *tag, *quality, eq)
 				processed.Add(1)
 				count := processed.Load()
 				pct := float64(count) / float64(total) * 100
@@ -223,7 +239,7 @@ func main() {
 	fmt.Println(bold + "  ══════════════════════════════════════════════════" + reset)
 }
 
-func processFile(j job, det detector.Detector, targetHz, threshold float64, dryRun, verbose bool, tag string) result {
+func processFile(j job, det detector.Detector, targetHz, threshold float64, dryRun, verbose bool, tag string, quality int, eq *audio.EQSettings) result {
 	// Decode to PCM.
 	samples, sampleRate, err := audio.DecodeToPCM(j.inPath)
 	if err != nil {
@@ -282,7 +298,7 @@ func processFile(j job, det detector.Detector, targetHz, threshold float64, dryR
 		samePath = true
 	}
 
-	if err := audio.ConvertWithSampleRate(j.inPath, outPath, ratio, sampleRate, tag); err != nil {
+	if err := audio.ConvertFormant(j.inPath, outPath, ratio, eq, tag, quality); err != nil {
 		return result{path: j.inPath, err: fmt.Errorf("convert: %w", err)}
 	}
 
@@ -319,7 +335,7 @@ func runDragDrop(paths []string) {
 	}
 
 	printBanner()
-	fmt.Printf(cyan+"  Target: "+reset+"%.1f Hz"+cyan+" | Detector: "+reset+"%s"+cyan+" | Workers: "+reset+"%d\n\n", targetHz, det.Name(), numWorkers)
+	fmt.Printf(cyan+"  Target: "+reset+"%.1f Hz"+cyan+" | Detector: "+reset+"%s"+cyan+" | Workers: "+reset+"%d"+cyan+" | Engine: "+reset+"rubberband\n\n", targetHz, det.Name(), numWorkers)
 
 	// Collect all audio files from dropped paths.
 	var jobs []job
@@ -386,7 +402,7 @@ func runDragDrop(paths []string) {
 		go func() {
 			defer wg.Done()
 			for j := range jobCh {
-				r := processFile(j, det, targetHz, threshold, false, true, "")
+				r := processFile(j, det, targetHz, threshold, false, true, "", 0, nil)
 				processed.Add(1)
 				count := processed.Load()
 				pct := float64(count) / float64(total) * 100
