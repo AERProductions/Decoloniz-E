@@ -89,6 +89,7 @@ func main() {
 	eqBass := flag.Float64("eq-bass", 0, "EQ bass boost/cut in dB (~100 Hz)")
 	eqMid := flag.Float64("eq-mid", 0, "EQ mid boost/cut in dB (~1000 Hz)")
 	eqTreble := flag.Float64("eq-treble", 0, "EQ treble boost/cut in dB (~8000 Hz)")
+	sampleRate := flag.Int("ar", 0, "Output sample rate in Hz (0=preserve source, e.g. 44100, 48000, 96000)")
 	verbose := flag.Bool("v", false, "Verbose output")
 	flag.Parse()
 
@@ -134,6 +135,9 @@ func main() {
 	}
 	if *quality > 0 {
 		fmt.Printf(cyan+"  Quality: "+reset+"%d/10\n", *quality)
+	}
+	if *sampleRate > 0 {
+		fmt.Printf(cyan+"  Sample Rate: "+reset+"%d Hz\n", *sampleRate)
 	}
 	if *dryRun {
 		fmt.Println(yellow + bold + "  ** DRY RUN — no files will be written **" + reset)
@@ -190,7 +194,7 @@ func main() {
 		go func() {
 			defer wg.Done()
 			for j := range jobCh {
-				r := processFile(j, det, *targetHz, *threshold, *dryRun, *verbose, *tag, *quality, eq)
+				r := processFile(j, det, *targetHz, *threshold, *dryRun, *verbose, *tag, *quality, eq, *sampleRate)
 				processed.Add(1)
 				count := processed.Load()
 				pct := float64(count) / float64(total) * 100
@@ -239,7 +243,7 @@ func main() {
 	fmt.Println(bold + "  ══════════════════════════════════════════════════" + reset)
 }
 
-func processFile(j job, det detector.Detector, targetHz, threshold float64, dryRun, verbose bool, tag string, quality int, eq *audio.EQSettings) result {
+func processFile(j job, det detector.Detector, targetHz, threshold float64, dryRun, verbose bool, tag string, quality int, eq *audio.EQSettings, sampleRate int) result {
 	// Decode to PCM.
 	samples, sampleRate, err := audio.DecodeToPCM(j.inPath)
 	if err != nil {
@@ -298,7 +302,7 @@ func processFile(j job, det detector.Detector, targetHz, threshold float64, dryR
 		samePath = true
 	}
 
-	if err := audio.ConvertFormant(j.inPath, outPath, ratio, eq, tag, quality); err != nil {
+	if err := audio.ConvertFormant(j.inPath, outPath, ratio, eq, tag, quality, sampleRate); err != nil {
 		return result{path: j.inPath, err: fmt.Errorf("convert: %w", err)}
 	}
 
@@ -402,7 +406,7 @@ func runDragDrop(paths []string) {
 		go func() {
 			defer wg.Done()
 			for j := range jobCh {
-				r := processFile(j, det, targetHz, threshold, false, true, "", 0, nil)
+				r := processFile(j, det, targetHz, threshold, false, true, "", 0, nil, 0)
 				processed.Add(1)
 				count := processed.Load()
 				pct := float64(count) / float64(total) * 100

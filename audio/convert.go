@@ -162,8 +162,9 @@ func ConvertWithSampleRate(inPath, outPath string, ratio float64, sampleRate int
 // This eliminates the "chipmunk" effect on large pitch shifts by keeping vocal
 // formants at their natural positions while only changing the fundamental pitch.
 // Optional EQ settings are appended to the filter chain.
-// quality: 0=default, 1-10 scale (controls codec bitrate/compression).
-func ConvertFormant(inPath, outPath string, ratio float64, eq *EQSettings, tag string, quality int) error {
+// quality: 0=match source bitrate, 1-10 scale (controls codec bitrate/compression).
+// sampleRate: 0=preserve source, >0 forces output sample rate (e.g. 44100, 48000, 96000).
+func ConvertFormant(inPath, outPath string, ratio float64, eq *EQSettings, tag string, quality int, sampleRate int) error {
 	if ratio > 0.9999 && ratio < 1.0001 {
 		return fmt.Errorf("ratio %.6f is effectively 1.0; no conversion needed", ratio)
 	}
@@ -224,6 +225,11 @@ func ConvertFormant(inPath, outPath string, ratio float64, eq *EQSettings, tag s
 				args = append(args, "-b:a", fmt.Sprintf("%dk", srcBitrate))
 			}
 		}
+	}
+
+	// Optional sample rate override
+	if sampleRate > 0 {
+		args = append(args, "-ar", fmt.Sprintf("%d", sampleRate))
 	}
 
 	args = append(args, "-y", "-v", "error", outPath)
