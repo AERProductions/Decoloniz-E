@@ -22,7 +22,7 @@ type NPUDetector struct {
 func (d *NPUDetector) Name() string { return "npu" }
 
 // Detect attempts NPU inference, falls back to FFT on failure.
-func (d *NPUDetector) Detect(samples []float64, sampleRate int) (float64, error) {
+func (d *NPUDetector) Detect(samples []float64, sampleRate int) (float64, float64, error) {
 	// --- NPU inference path (to be implemented on XDNA workstation) ---
 	//
 	// Implementation steps:
@@ -50,9 +50,9 @@ func (d *NPUDetector) Detect(samples []float64, sampleRate int) (float64, error)
 		d.fallback = &FFTDetector{}
 	}
 
-	freq, err := d.fallback.Detect(samples, sampleRate)
+	freq, confidence, err := d.fallback.Detect(samples, sampleRate)
 	if err != nil {
-		return 0, fmt.Errorf("npu: model not available, fft fallback also failed: %w", err)
+		return 0, 0, fmt.Errorf("npu: model not available, fft fallback also failed: %w", err)
 	}
-	return freq, nil
+	return freq, confidence, nil
 }

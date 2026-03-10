@@ -26,6 +26,23 @@ func IsSupportedFile(path string) bool {
 	return SupportedExtensions[ext]
 }
 
+// buildAtempoChain returns one or more chained atempo= filters that achieve
+// the requested speed factor. FFmpeg's atempo accepts [0.5, 100.0], so we
+// chain multiple stages for extreme values.
+func buildAtempoChain(factor float64) string {
+	var parts []string
+	for factor < 0.5 {
+		parts = append(parts, "atempo=0.5")
+		factor /= 0.5
+	}
+	for factor > 100.0 {
+		parts = append(parts, "atempo=100.0")
+		factor /= 100.0
+	}
+	parts = append(parts, fmt.Sprintf("atempo=%f", factor))
+	return strings.Join(parts, ",")
+}
+
 // Convert uses FFmpeg to pitch-shift an audio file by the given ratio.
 // ratio = targetHz / detectedHz (e.g., 432/440 = 0.98182...).
 // Output goes to outPath. Preserves metadata via -map_metadata 0.
@@ -35,9 +52,10 @@ func Convert(inPath, outPath string, ratio float64) error {
 		return fmt.Errorf("ratio %.6f is effectively 1.0; no conversion needed", ratio)
 	}
 
-	// Build the audio filter: asetrate adjusts playback rate, aresample restores original sample rate.
-	// This changes pitch without changing duration perceptibly for small ratios.
-	filter := fmt.Sprintf("asetrate=44100*%f,aresample=44100", ratio)
+	// Pipeline: asetrate shifts pitch (changes tempo), aresample restores
+	// sample rate, atempo compensates tempo back to original duration.
+	// Net effect: pitch changes, duration stays the same.
+	filter := fmt.Sprintf("asetrate=44100*%f,aresample=44100,%s", ratio, buildAtempoChain(1.0/ratio))
 
 	cmd := exec.Command("ffmpeg",
 		"-i", inPath,
@@ -66,7 +84,7 @@ func ConvertWithSampleRate(inPath, outPath string, ratio float64, sampleRate int
 		return fmt.Errorf("ratio %.6f is effectively 1.0; no conversion needed", ratio)
 	}
 
-	filter := fmt.Sprintf("asetrate=%d*%f,aresample=%d", sampleRate, ratio, sampleRate)
+	filter := fmt.Sprintf("asetrate=%d*%f,aresample=%d,%s", sampleRate, ratio, sampleRate, buildAtempoChain(1.0/ratio))
 
 	args := []string{
 		"-i", inPath,

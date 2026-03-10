@@ -239,9 +239,22 @@ func processFile(j job, det detector.Detector, targetHz, threshold float64, dryR
 	chunk := samples[offset : offset+chunkSize]
 
 	// Detect A4 reference.
-	detected, err := det.Detect(chunk, sampleRate)
+	detected, confidence, err := det.Detect(chunk, sampleRate)
 	if err != nil {
 		return result{path: j.inPath, err: fmt.Errorf("detect: %w", err)}
+	}
+
+	// Warn on low-confidence or extreme shift.
+	shiftPct := math.Abs(detected-targetHz) / detected * 100
+	if confidence < 0.3 {
+		if verbose {
+			fmt.Printf("\n  "+yellow+"WARN "+reset+" %s "+dim+"low confidence %.0f%% — detection may be wrong"+reset+"\n", filepath.Base(j.inPath), confidence*100)
+		}
+	}
+	if shiftPct > 5 {
+		if verbose {
+			fmt.Printf("\n  "+yellow+"WARN "+reset+" %s "+dim+"large shift %.1f%% (%.1f→%.1f Hz) — song may not be standard tuning"+reset+"\n", filepath.Base(j.inPath), shiftPct, detected, targetHz)
+		}
 	}
 
 	// Check threshold — skip if already at target.

@@ -17,10 +17,10 @@ func (d *FFTDetector) Name() string { return "fft" }
 // Detect returns the estimated A4 reference frequency from the given samples.
 // It finds the dominant spectral peak via FFT, applies quadratic interpolation,
 // and octave-folds the result into the A4 band (400–480 Hz).
-func (d *FFTDetector) Detect(samples []float64, sampleRate int) (float64, error) {
+func (d *FFTDetector) Detect(samples []float64, sampleRate int) (float64, float64, error) {
 	n := len(samples)
 	if n < 2048 {
-		return 0, fmt.Errorf("need at least 2048 samples, got %d", n)
+		return 0, 0, fmt.Errorf("need at least 2048 samples, got %d", n)
 	}
 
 	// Use the largest power-of-2 that fits in the sample slice (max 65536).
@@ -59,7 +59,19 @@ func (d *FFTDetector) Detect(samples []float64, sampleRate int) (float64, error)
 	}
 
 	if peakMag == 0 {
-		return 0, fmt.Errorf("no spectral energy above noise floor")
+		return 0, 0, fmt.Errorf("no spectral energy above noise floor")
+	}
+
+	// Confidence: how much the peak stands out from the spectral mean.
+	var magSum float64
+	nBins := maxBin - minBin + 1
+	for i := minBin; i <= maxBin; i++ {
+		magSum += math.Hypot(real(spectrum[i]), imag(spectrum[i]))
+	}
+	meanMag := magSum / float64(nBins)
+	confidence := 0.0
+	if meanMag > 0 {
+		confidence = math.Min(1.0, peakMag/(meanMag*10.0))
 	}
 
 	// Quadratic (parabolic) peak interpolation for sub-bin precision.
@@ -88,5 +100,5 @@ func (d *FFTDetector) Detect(samples []float64, sampleRate int) (float64, error)
 		a4 /= 2
 	}
 
-	return a4, nil
+	return a4, confidence, nil
 }
