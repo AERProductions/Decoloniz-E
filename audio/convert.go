@@ -139,7 +139,8 @@ func ConvertWithSampleRate(inPath, outPath string, ratio float64, sampleRate int
 // This eliminates the "chipmunk" effect on large pitch shifts by keeping vocal
 // formants at their natural positions while only changing the fundamental pitch.
 // Optional EQ settings are appended to the filter chain.
-func ConvertFormant(inPath, outPath string, ratio float64, eq *EQSettings, tag string) error {
+// quality: 0=default, 1-10 scale (controls codec bitrate/compression).
+func ConvertFormant(inPath, outPath string, ratio float64, eq *EQSettings, tag string, quality int) error {
 	if ratio > 0.9999 && ratio < 1.0001 {
 		return fmt.Errorf("ratio %.6f is effectively 1.0; no conversion needed", ratio)
 	}
@@ -160,6 +161,40 @@ func ConvertFormant(inPath, outPath string, ratio float64, eq *EQSettings, tag s
 	} else {
 		args = append(args, "-map_metadata", "0")
 	}
+
+	// Quality/bitrate control based on output format
+	if quality > 0 {
+		ext := strings.ToLower(filepath.Ext(outPath))
+		switch ext {
+		case ".mp3":
+			vbr := 10 - quality
+			if vbr < 0 {
+				vbr = 0
+			}
+			args = append(args, "-q:a", fmt.Sprintf("%d", vbr))
+		case ".ogg":
+			args = append(args, "-q:a", fmt.Sprintf("%d", quality))
+		case ".opus":
+			bitrate := 48 + (quality-1)*30
+			if bitrate > 320 {
+				bitrate = 320
+			}
+			args = append(args, "-b:a", fmt.Sprintf("%dk", bitrate))
+		case ".flac":
+			comp := 10 - quality
+			if comp < 0 {
+				comp = 0
+			}
+			args = append(args, "-compression_level", fmt.Sprintf("%d", comp))
+		case ".m4a", ".aac":
+			bitrate := 64 + (quality-1)*28
+			if bitrate > 320 {
+				bitrate = 320
+			}
+			args = append(args, "-b:a", fmt.Sprintf("%dk", bitrate))
+		}
+	}
+
 	args = append(args, "-y", "-v", "error", outPath)
 
 	cmd := exec.Command("ffmpeg", args...)
